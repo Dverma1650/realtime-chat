@@ -1,5 +1,7 @@
+import "dotenv/config";
 import { WebSocketServer, WebSocket } from "ws";
 import crypto from "node:crypto";
+import { getAIResponse } from "./services/ai.service";
 
 const PORT = 8000;
 
@@ -11,6 +13,10 @@ const users = new Map<WebSocket, string>();
 
 console.log(`WebSocket server running on ws://localhost:${PORT}`);
 
+// --------------------------------
+// BROADCAST
+// --------------------------------
+
 function broadcast(data: object) {
   const message = JSON.stringify(data);
 
@@ -21,6 +27,10 @@ function broadcast(data: object) {
   });
 }
 
+// --------------------------------
+// ONLINE USERS
+// --------------------------------
+
 function broadcastOnlineUsers() {
   const onlineUsers = Array.from(users.values());
 
@@ -30,10 +40,14 @@ function broadcastOnlineUsers() {
   });
 }
 
+// --------------------------------
+// WEBSOCKET CONNECTION
+// --------------------------------
+
 wss.on("connection", (socket) => {
   console.log("Client connected");
 
-  socket.on("message", (message) => {
+  socket.on("message", async (message) => {
     try {
       const data = JSON.parse(message.toString());
 
@@ -74,17 +88,55 @@ wss.on("connection", (socket) => {
           return;
         }
 
+        const text = data.text.trim();
+
+        // --------------------------------
+        // USER MESSAGE
+        // --------------------------------
+
         const chatMessage = {
           type: "message",
           messageId: crypto.randomUUID(),
           username,
-          text: data.text.trim(),
+          text,
           timestamp: Date.now(),
         };
 
         console.log("Broadcasting message:", chatMessage);
 
+        // Send user message to everyone
         broadcast(chatMessage);
+
+        // --------------------------------
+        // AI RESPONSE
+        // --------------------------------
+
+        try {
+          console.log("Sending message to AI...");
+
+          const aiResponse = await getAIResponse(text);
+
+          console.log("AI response:", aiResponse);
+
+          // Send AI response to everyone
+          broadcast({
+            type: "ai_response",
+            messageId: crypto.randomUUID(),
+            username: "AI",
+            text: aiResponse,
+            timestamp: Date.now(),
+          });
+        } catch (error) {
+          console.error("AI error:", error);
+
+          // Send error only to the user who asked
+          socket.send(
+            JSON.stringify({
+              type: "ai_error",
+              message: "Sorry, something went wrong with the AI.",
+            })
+          );
+        }
 
         return;
       }
